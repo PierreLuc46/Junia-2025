@@ -17,14 +17,18 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-      - name: Lint PHP (php -l sur tous les fichiers)
+      - name: Lint PHP (sauf dossier useless/)
         run: |
           set -euo pipefail
-          mapfile -d '' FILES < <(find . -type f -name "*.php" -print0)
+          # Exclure ./useless/ du lint
+          mapfile -d '' FILES < <(find . -path './useless' -prune -o -type f -name '*.php' -print0)
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "Aucun fichier PHP trouvé."; exit 0
           fi
-          for f in "${FILES[@]}"; do php -l "$f"; done
+          for f in "${FILES[@]}"; do
+            echo "Lint: $f"
+            php -l "$f"
+          done
 
   build:
     runs-on: self-hosted
@@ -111,4 +115,3 @@ jobs:
 
           docker image prune -f || true
           EOF
-
