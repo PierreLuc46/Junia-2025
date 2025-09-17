@@ -4,8 +4,14 @@ on:
   push:
     branches: [ "master" ]
 
+# Le GITHUB_TOKEN suffira pour pousser sur GHCR
+permissions:
+  contents: read
+  packages: write
+
 env:
-  IMAGE_NAME: pierreluc46/junia-2025   # ⬅️ remplace si besoin
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/pierreluc46/junia-2025   # <= tout en minuscules
   IMAGE_TAG: ${{ github.sha }}
   DOCKER_PLATFORMS: linux/amd64
 
@@ -20,7 +26,6 @@ jobs:
       - name: Lint PHP (sauf dossier useless/)
         run: |
           set -euo pipefail
-          # Exclure ./useless/ du lint
           mapfile -d '' FILES < <(find . -path './useless' -prune -o -type f -name '*.php' -print0)
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "Aucun fichier PHP trouvé."; exit 0
@@ -36,11 +41,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
@@ -54,11 +64,16 @@ jobs:
     needs: [build]
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push images to GHCR
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -87,14 +102,14 @@ jobs:
             ssh-keyscan -t rsa "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
           fi
 
-      - name: Remote deploy
+      - name: Remote deploy (pull depuis GHCR)
         env:
           REMOTE_HOST: ${{ secrets.SSH_HOST }}
           REMOTE_USER: ${{ secrets.SSH_USER }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ssh -o StrictHostKeyChecking=yes "${REMOTE_USER}@${REMOTE_HOST}" bash -s << 'EOF'
           set -euo pipefail
@@ -103,7 +118,10 @@ jobs:
             echo "Docker non installé sur la cible"; exit 1
           fi
 
-          echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
+          # Tente un login GHCR si le token a été passé, sinon on suppose l'image publique
+          if [ -n "${GHCR_TOKEN:-}" ]; then
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin || true
+          fi
 
           docker pull "${IMAGE_NAME}:${IMAGE_TAG}" || docker pull "${IMAGE_NAME}:master"
 
