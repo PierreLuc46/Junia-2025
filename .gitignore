@@ -1,0 +1,16 @@
+# Ignorer le runner auto-hébergé
+actions-runner*/
+
+# Logs et fichiers temporaires
+*.log
+*.tmp
+
+# Fichiers d'environnement locaux
+.env
+
+# Dépendances PHP
+vendor/
+composer.lock
+
+# Artefacts Docker
+.docker/
