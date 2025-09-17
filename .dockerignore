@@ -6,3 +6,4 @@ actions-runner*
 .docker/
 vendor/
 node_modules/
+useless/
