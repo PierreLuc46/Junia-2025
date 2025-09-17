@@ -4,14 +4,14 @@ on:
   push:
     branches: [ "master" ]
 
-# Le GITHUB_TOKEN suffira pour pousser sur GHCR
+# GITHUB_TOKEN suffit pour pousser sur GHCR
 permissions:
   contents: read
   packages: write
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ghcr.io/pierreluc46/junia-2025   # <= tout en minuscules
+  IMAGE_NAME: ghcr.io/pierreluc46/junia-2025   # <-- tout en minuscules
   IMAGE_TAG: ${{ github.sha }}
   DOCKER_PLATFORMS: linux/amd64
 
@@ -23,7 +23,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-      - name: Lint PHP (sauf dossier useless/)
+      - name: Lint PHP (exclut ./useless/)
         run: |
           set -euo pipefail
           mapfile -d '' FILES < <(find . -path './useless' -prune -o -type f -name '*.php' -print0)
@@ -102,7 +102,7 @@ jobs:
             ssh-keyscan -t rsa "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
           fi
 
-      - name: Remote deploy (no sudo, port 8080)
+      - name: Remote deploy (no sudo, force /usr/bin/docker, port 8080)
         env:
           REMOTE_HOST: ${{ secrets.SSH_HOST }}
           REMOTE_USER: ${{ secrets.SSH_USER }}
@@ -114,21 +114,31 @@ jobs:
           ssh -o StrictHostKeyChecking=yes "${REMOTE_USER}@${REMOTE_HOST}" \
             GHCR_USER="${GHCR_USER}" GHCR_TOKEN="${GHCR_TOKEN}" IMAGE_NAME="${IMAGE_NAME}" IMAGE_TAG="${IMAGE_TAG}" 'bash -s' << 'EOF'
           set -euo pipefail
+          set -x
 
-          # Login GHCR si image privée (sinon on ignore l'erreur)
-          if [ -n "${GHCR_TOKEN:-}" ]; then
-            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin || true
+          # Eviter tout alias "docker='sudo docker'"
+          unalias docker 2>/dev/null || true
+
+          # Chemin docker explicite
+          DOCKER_BIN="/usr/bin/docker"
+          if ! [ -x "$DOCKER_BIN" ]; then
+            DOCKER_BIN="$(command -v docker)"
           fi
 
-          # Pull de l'image taggée par le SHA, fallback sur :master
-          docker pull "${IMAGE_NAME}:${IMAGE_TAG}" || docker pull "${IMAGE_NAME}:master"
+          # Login GHCR si token dispo (ignore si image publique)
+          if [ -n "${GHCR_TOKEN:-}" ]; then
+            echo "${GHCR_TOKEN}" | "$DOCKER_BIN" login ghcr.io -u "${GHCR_USER}" --password-stdin || true
+          fi
 
-          # Stop & remove ancien conteneur si présent
-          docker rm -f webapp 2>/dev/null || true
+          # Pull de l'image taguée SHA, sinon fallback :master
+          "$DOCKER_BIN" pull "${IMAGE_NAME}:${IMAGE_TAG}" || "$DOCKER_BIN" pull "${IMAGE_NAME}:master"
+
+          # Stop & remove ancien conteneur
+          "$DOCKER_BIN" rm -f webapp 2>/dev/null || true
 
           # Lancer sur 8080 pour éviter le conflit avec nginx:80
-          docker run -d --name webapp -p 8080:80 "${IMAGE_NAME}:${IMAGE_TAG}"
+          "$DOCKER_BIN" run -d --name webapp -p 8080:80 "${IMAGE_NAME}:${IMAGE_TAG}"
 
-          # Nettoyage
-          docker image prune -f || true
+          # Nettoyage léger
+          "$DOCKER_BIN" image prune -f || true
           EOF
