@@ -1,0 +1,8 @@
+.git
+.gitignore
+actions-runner*
+*.log
+*.tmp
+.docker/
+vendor/
+node_modules/
