@@ -102,7 +102,7 @@ jobs:
             ssh-keyscan -t rsa "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
           fi
 
-      - name: Remote deploy (pull depuis GHCR)
+      - name: Remote deploy (no sudo, port 8080)
         env:
           REMOTE_HOST: ${{ secrets.SSH_HOST }}
           REMOTE_USER: ${{ secrets.SSH_USER }}
@@ -111,25 +111,24 @@ jobs:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ssh -o StrictHostKeyChecking=yes "${REMOTE_USER}@${REMOTE_HOST}" bash -s << 'EOF'
+          ssh -o StrictHostKeyChecking=yes "${REMOTE_USER}@${REMOTE_HOST}" \
+            GHCR_USER="${GHCR_USER}" GHCR_TOKEN="${GHCR_TOKEN}" IMAGE_NAME="${IMAGE_NAME}" IMAGE_TAG="${IMAGE_TAG}" 'bash -s' << 'EOF'
           set -euo pipefail
 
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "Docker non installé sur la cible"; exit 1
-          fi
-
-          # Tente un login GHCR si le token a été passé, sinon on suppose l'image publique
+          # Login GHCR si image privée (sinon on ignore l'erreur)
           if [ -n "${GHCR_TOKEN:-}" ]; then
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin || true
           fi
 
+          # Pull de l'image taggée par le SHA, fallback sur :master
           docker pull "${IMAGE_NAME}:${IMAGE_TAG}" || docker pull "${IMAGE_NAME}:master"
 
-          if docker ps -a --format '{{.Names}}' | grep -q '^webapp$'; then
-            docker rm -f webapp
-          fi
+          # Stop & remove ancien conteneur si présent
+          docker rm -f webapp 2>/dev/null || true
 
-          docker run -d --name webapp -p 80:80 "${IMAGE_NAME}:${IMAGE_TAG}"
+          # Lancer sur 8080 pour éviter le conflit avec nginx:80
+          docker run -d --name webapp -p 8080:80 "${IMAGE_NAME}:${IMAGE_TAG}"
 
+          # Nettoyage
           docker image prune -f || true
           EOF
